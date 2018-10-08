@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/semantic-ui/2.3.3/semantic.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/selectize.js/0.12.6/css/selectize.default.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/selectize.js/0.12.6/css/selectize.min.css">
+
+  <style>
+    .vega-actions a {
+      margin-right: 12px;
+      color: #757575;
+      font-weight: normal;
+      font-size: 13px;
+    }
+
+    .error {
+      color: red;
+    }
+
+    .selectize-control.multi .selectize-input>div {
+      color: white;
+    }
+  </style>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vega/3.2.1/vega.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vega-lite/2.4.1/vega-lite.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vega-embed/3.0.0/vega-embed.min.js"></script>
+
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/selectize.js/0.12.6/js/standalone/selectize.min.js"></script>
+
+</head>
+
+<body>
+  <div class="ui container">
+    <div class="ui two column grid">
+      <div class="row">
+        <div class="column">
+          <div id="vis"></div>
+        </div>
+        <div class="column">
+          <form class="ui form">
+            <label>Ancestries to display</label>
+            <select id="ancestry_select" placeholder="Ancestries to display" multiple></select>
+            <button type="button" id="display_all" class="ui primary button">
+              Display all
+            </button>
+            <button type="button" id="clear" class="ui button">
+              Clear
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="text/javascript">
+    const embed_opt = {
+      "mode": "vega-lite",
+      renderer: 'svg'
+    };
+
+    function showError(el, error) {
+      el.innerHTML = ('<div class="error">'
+        + '<p>JavaScript Error: ' + error.message + '</p>'
+        + "<p>This usually means there's a typo in your chart specification. "
+        + "See the javascript console for the full traceback.</p>"
+        + '</div>');
+      throw error;
+    }
+
+    const vega_anchor = document.getElementById('vis');
+
+    function display_selected_ancestries(spec, enlarged_color_range, color_index_from_ancestry, records) {
+      let select = $("#ancestry_select")[0].selectize;
+      let selected_items = select.items;
+      let records_to_background = records.filter(rcd => !selected_items.includes(rcd.ancestry_label))
+      let records_to_display = records.filter(rcd => selected_items.includes(rcd.ancestry_label))
+
+      spec.layer[0].data.values = records_to_background;
+      spec.layer[1].data.values = records_to_display;
+
+      let sorted_selected_items = selected_items.sort();
+
+      let ordered_color_range = sorted_selected_items.map((ancestry) => enlarged_color_range[color_index_from_ancestry.get(ancestry)]);
+      spec.layer[1].encoding.color.scale.range = ordered_color_range.slice(0, selected_items.length);
+
+      vegaEmbed("#vis", spec, embed_opt)
+        .catch(error => showError(vega_anchor, error));
+    }
+
+    function enlarge_color_range(color_range, n) {
+      let nb_colors = color_range.length;
+
+      let nb_color_ranges = Math.floor(n / nb_colors) + 1;
+      let filler = new Array(nb_color_ranges - 1);
+      filler.fill(color_range);
+      return color_range.concat(...filler);
+    }
+
+    function next_available_index(color_index_from_ancestry) {
+      let occupied_indices = [...color_index_from_ancestry.values()];
+
+      for (let i of Array(color_index_from_ancestry.size + 1).keys()) {
+        if (!occupied_indices.includes(i)) {
+          return i;
+        }
+      }
+    }
+
+    $(function () {
+      let spec = SPEC_VALUE;
+
+      let records = spec.layer[1].data.values;
+      spec.layer[1].data.values = [];
+
+      let ancestries = [...new Set(records.map(rcd => rcd.ancestry_label))];
+      let ancestry_options = ancestries.map(anc => ({ value: anc, text: anc }))
+
+      let color_range = spec.layer[1].encoding.color.scale.range;
+      let enlarged_color_range = enlarge_color_range(color_range, ancestries.length);
+      let color_index_from_ancestry = new Map();
+
+      let on_item_add = (value) => {
+        let available_index = next_available_index(color_index_from_ancestry);
+        color_index_from_ancestry.set(value, available_index);
+        display_selected_ancestries(spec, enlarged_color_range, color_index_from_ancestry, records);
+      };
+
+      $("#ancestry_select").selectize({
+        options: ancestry_options,
+        onItemAdd: on_item_add,
+        onItemRemove: (value) => {
+          color_index_from_ancestry.delete(value);
+          display_selected_ancestries(spec, enlarged_color_range, color_index_from_ancestry, records);
+        },
+      });
+
+      let sorted_ancestries = ancestries.sort();
+
+      $("#display_all").click(function () {
+        let select = $("#ancestry_select")[0].selectize;
+        select.off("item_add");
+        select.addItems(ancestries);
+        select.on("item_add", on_item_add);
+
+        color_index_from_ancestry.clear();
+
+        for (let ancestry of sorted_ancestries) {
+          let available_index = next_available_index(color_index_from_ancestry);
+          color_index_from_ancestry.set(ancestry, available_index);
+        }
+
+        display_selected_ancestries(spec, enlarged_color_range, color_index_from_ancestry, records);
+      });
+
+      $("#clear").click(function () {
+        $("#ancestry_select")[0].selectize.clear();
+        color_index_from_ancestry.clear();
+      });
+    });
+
+  </script>
+</body>
+
+</html>
